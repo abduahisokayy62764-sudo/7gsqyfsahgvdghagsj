@@ -419,6 +419,30 @@ export default function ChatOverlay({
   const [recStartTs, setRecStartTs] = useState<number>(0);
   const [recLevels, setRecLevels] = useState<number[]>([]);
   const [recElapsed, setRecElapsed] = useState(0);
+  // User-facing recording error (permission denied, mic busy, upload failed…).
+  const [recError, setRecError] = useState<string | null>(null);
+  // Auto-dismiss the recording error after a few seconds.
+  useEffect(() => {
+    if (!recError) return;
+    const t = setTimeout(() => setRecError(null), 5000);
+    return () => clearTimeout(t);
+  }, [recError]);
+  // Guarantee the microphone is released if the chat unmounts mid-recording.
+  useEffect(() => {
+    return () => {
+      try { mediaRecorderRef.current?.stop(); } catch { /* noop */ }
+      mediaRecorderRef.current = null;
+      if (recRafRef.current) cancelAnimationFrame(recRafRef.current);
+      if (recStreamRef.current) {
+        recStreamRef.current.getTracks().forEach((t) => t.stop());
+        recStreamRef.current = null;
+      }
+      if (audioContextRef.current) {
+        try { void audioContextRef.current.close(); } catch { /* noop */ }
+        audioContextRef.current = null;
+      }
+    };
+  }, []);
 
   // Video compression progress (per optimistic message id)
   const [compressingId, setCompressingId] = useState<string | null>(null);
@@ -1028,36 +1052,42 @@ export default function ChatOverlay({
   // ── Voice recording
   const startRecording = async () => {
     if (recording) return;
+    setRecError(null);
     try {
       haptics.medium();
-      // Explicit constraints yield cleaner voice capture across browsers:
-      // echo/noise processing on, mono (voice needs no stereo), and a stable
-      // 48 kHz sample rate. autoGainControl is left ON so quiet speakers are
-      // audible; the playback limiter guards against any resulting clipping.
+      // ── Option A: clearest & most natural (Instagram-style) ──────────────
+      // echoCancellation ON (prevents feedback, negligible fidelity cost) but
+      // noiseSuppression + autoGainControl OFF — those route audio through the
+      // browser's WebRTC telephony DSP which band-limits to ~16 kHz and smears
+      // the signal (the "muffled / robotic / cheap" sound). We also DO NOT force
+      // a sampleRate: forcing one triggers resampling distortion and cross-device
+      // incompatibility. Loudness is instead normalised cleanly at playback.
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          noiseSuppression: false,
+          autoGainControl: false,
           channelCount: 1,
-          sampleRate: 48000,
         },
       });
       recStreamRef.current = stream;
+      // Prefer AAC/MP4: it is the only container that `decodeAudioData` can
+      // reliably decode on BOTH iOS Safari and Android/desktop Chrome, so a note
+      // recorded on one phone always plays on the other. Opus/WebM is a fallback
+      // for browsers that cannot record MP4 (older Chromium / Firefox).
       const mimeCandidates = [
-        // Prefer AAC/MP4 first — iOS Safari, Chrome (v116+), and Firefox all
-        // decode this natively. Fallback to opus/webm for older Chromium.
-        "audio/mp4;codecs=mp4a.40.2",
+        "audio/mp4;codecs=mp4a.40.2", // AAC-LC
         "audio/mp4",
         "audio/aac",
-        "audio/mpeg",
         "audio/webm;codecs=opus",
+        "audio/ogg;codecs=opus",
         "audio/webm",
       ];
       let mime = "";
       for (const m of mimeCandidates) {
         if (MediaRecorder.isTypeSupported(m)) { mime = m; break; }
       }
+      // 128 kbps mono is transparent for speech — high quality, not "cheap".
       const mr = new MediaRecorder(
         stream,
         mime
@@ -1067,7 +1097,9 @@ export default function ChatOverlay({
       mediaRecorderRef.current = mr;
       audioChunksRef.current = [];
       mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data); };
-      mr.start(200);
+      // No timeslice → one clean final blob on stop (most reliable on iOS Safari,
+      // avoids fragmented-container decode glitches).
+      mr.start();
       const startTs = Date.now();
       setRecStartTs(startTs);
       setRecording(true);
@@ -1105,6 +1137,18 @@ export default function ChatOverlay({
       recRafRef.current = requestAnimationFrame(tick);
     } catch (err) {
       console.error("[voice] start failed", err);
+      // Release anything that may have opened before failure.
+      stopAllRecordingResources();
+      const name = (err as { name?: string })?.name || "";
+      let msg = "Couldn't start recording. Please try again.";
+      if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
+        msg = "Microphone access is blocked. Allow mic access in your browser/site settings, then try again.";
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        msg = "No microphone was found on this device.";
+      } else if (name === "NotReadableError" || name === "TrackStartError") {
+        msg = "Your microphone is being used by another app. Close it and try again.";
+      }
+      setRecError(msg);
       setRecording(false);
     }
   };
@@ -1186,6 +1230,8 @@ export default function ChatOverlay({
     const url = await uploadChatMedia(blob, "voice", sender);
     if (!url) {
       setMessages((prev) => prev.filter((m) => m.id !== optId));
+      setRecError("Couldn't upload the voice message. Check your connection and try again.");
+      try { URL.revokeObjectURL(localUrl); } catch { /* noop */ }
       return;
     }
     const saved = await cloudCreateMediaMessage("voice", url, sender, SESSION_ID, {
@@ -1199,6 +1245,7 @@ export default function ChatOverlay({
       });
     } else {
       setMessages((prev) => prev.filter((m) => m.id !== optId));
+      setRecError("Couldn't send the voice message. Please try again.");
     }
     try { URL.revokeObjectURL(localUrl); } catch { /* noop */ }
   };
@@ -2320,6 +2367,37 @@ export default function ChatOverlay({
                 <option value="faizan">Faizan → Umme Habiba</option>
               </select>
             </div>
+
+            {/* Recording / permission error banner */}
+            {recError && (
+              <div
+                data-testid="voice-error-banner"
+                style={{
+                  marginBottom: 8,
+                  padding: "9px 14px",
+                  borderRadius: 14,
+                  background: "rgba(255,77,122,0.12)",
+                  border: "1px solid rgba(255,77,122,0.4)",
+                  color: "#c9184a",
+                  fontFamily: "'Cormorant Garamond', serif",
+                  fontSize: 14,
+                  lineHeight: 1.35,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span aria-hidden style={{ flexShrink: 0 }}>🎙️</span>
+                <span style={{ flex: 1 }}>{recError}</span>
+                <button
+                  onClick={() => setRecError(null)}
+                  aria-label="Dismiss"
+                  style={{ background: "transparent", border: "none", color: "#c9184a", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {/* Composer row: either recording UI or normal composer */}
             {recording ? (
@@ -3653,6 +3731,8 @@ function VoicePlayer({ url, durationMs, inverse }: { url: string; durationMs: nu
   const offsetRef = useRef<number>(0);
   const rafRef = useRef<number>(0);
   const decodePromiseRef = useRef<Promise<boolean> | null>(null);
+  // Peak sample magnitude of the decoded clip (for clean loudness normalisation).
+  const peakRef = useRef<number>(1);
 
   // Cleanup on URL change / unmount
   useEffect(() => {
@@ -3706,6 +3786,22 @@ function VoicePlayer({ url, durationMs, inverse }: { url: string; durationMs: nu
           }
         });
         bufRef.current = buf;
+        // Measure the true peak so playback can be normalised to a consistent,
+        // healthy loudness WITHOUT any compression/limiting (which is what made
+        // clips sound squashed/harsh). Scanned once per clip.
+        try {
+          let peak = 0;
+          for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+            const data = buf.getChannelData(ch);
+            for (let i = 0; i < data.length; i++) {
+              const a = data[i] < 0 ? -data[i] : data[i];
+              if (a > peak) peak = a;
+            }
+          }
+          peakRef.current = peak > 0.0001 ? peak : 1;
+        } catch {
+          peakRef.current = 1;
+        }
         if (isFinite(buf.duration) && buf.duration > 0) {
           setTotalMs(Math.round(buf.duration * 1000));
         }
@@ -3736,20 +3832,17 @@ function VoicePlayer({ url, durationMs, inverse }: { url: string; durationMs: nu
     const src = ctx.createBufferSource();
     src.buffer = buf;
     const gain = ctx.createGain();
-    // Modest boost for quiet mobile-mic captures. Previously this was 1.35,
-    // which — combined with the browser's default auto-gain during recording
-    // (levels already near full scale) — pushed samples past 0 dBFS and caused
-    // hard CLIPPING at the destination. That clipping is exactly the harsh,
-    // garbled "unclear" sound users heard. We now use a gentler 1.12 boost and
-    // route it through a brick-wall limiter so the signal can NEVER clip.
-    gain.gain.value = 1.12;
-    const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -1.5; // begin limiting just below full scale
-    limiter.knee.value = 0;         // hard knee → true peak limiter
-    limiter.ratio.value = 20;       // heavy ratio → brick-wall
-    limiter.attack.value = 0.003;   // catch transients fast
-    limiter.release.value = 0.25;
-    src.connect(gain).connect(limiter).connect(ctx.destination);
+    // CLEAN loudness normalisation — no compressor, no limiter. Because we now
+    // record with autoGainControl OFF, clips have natural dynamics and their
+    // peak sits below full scale, so we can simply scale the whole clip up to a
+    // safe target peak (~0.97 ≈ -0.3 dBFS). This makes every note a consistent,
+    // healthy volume while staying perfectly transparent — no pumping, no
+    // clipping, no "cheap" squashed sound. Boost is capped so a very quiet clip
+    // isn't amplified into its own noise floor.
+    const target = 0.97;
+    const norm = Math.min(4, Math.max(1, target / peakRef.current));
+    gain.gain.value = norm;
+    src.connect(gain).connect(ctx.destination);
 
     // Clamp resume offset to buffer bounds.
     const startOffset = Math.max(0, Math.min(buf.duration - 0.01, offsetRef.current));
