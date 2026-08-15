@@ -101,3 +101,40 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Fix the search input keyboard-navigation bug. After the first search, pressing Up/Down arrow keys no longer navigates search results — instead the keypress scrolls/affects the chat or moves focus elsewhere. The same single search bar is used for 'photo'/'video'/'voice' searches. Up/Down must consistently navigate results, stay isolated to the search input, and keep working across repeated searches."
+
+frontend:
+  - task: "Search input Up/Down keyboard navigation stays isolated & works across repeated searches"
+    implemented: true
+    working: true
+    file: "src/pages/homepage/_components/chat-overlay.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Root cause: runSearch() called searchInputRef.current?.blur() after submit, dropping focus onto the document; after that Up/Down scrolled the messages container instead of navigating results. Also the input only handled Enter (no ArrowUp/ArrowDown). Fix: (1) removed blur() so focus stays in the input; (2) added onKeyDown handling for ArrowDown (next/older result -> gotoResult(searchIndex+1)), ArrowUp (previous/newer -> gotoResult(searchIndex-1)), Enter (runSearch), Escape (closeSearch), each with e.preventDefault() + e.stopPropagation() so arrow events do not bubble to the chat/scroll container. Same single search bar handles 'photo'/'video'/'voice' queries so this covers all media searches. Passcode to reach the chat: 2407."
+        -working: true
+        -agent: "testing"
+        -comment: "VERIFIED - Bug fix working correctly. Tested all scenarios: (1) Unlocked with passcode 2407 successfully. (2) Search bar opens with input focused. (3) First search for 'love' returned 172 results, counter displayed correctly (1/172). (4) Arrow key navigation worked: ArrowDown changed counter from 1/172 → 2/172 → 3/172, ArrowUp changed back to 2/172. Focus remained on search input throughout. (5) CRITICAL REGRESSION CHECK PASSED: Second search for 'omg' (67 results) - arrows still worked correctly (1/67 → 2/67 → 1/67), focus stayed on input. (6) Third search for 'photo' (24 results) - arrows worked (1/24 → 2/24), focus maintained. (7) Chat scroll position remained stable (scrollTop: 0), no free-scrolling during arrow navigation. The fix successfully keeps focus in the input after submit and prevents arrow key events from bubbling to the chat container. All test scenarios passed."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 0
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Search input Up/Down keyboard navigation stays isolated & works across repeated searches"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "Please verify the search keyboard-navigation bug fix in the chat. Steps: (1) On the lock screen enter passcode 2407 to open the chat. (2) Tap the search (magnifier) icon top-right to open the search bar (data-testid=chat-search-toggle; input=chat-search-input). (3) Type a word that has multiple matches and press Enter -> results load, counter shows e.g. 1/N (chat-search-counter). (4) With the input still focused, press ArrowDown and ArrowUp repeatedly and confirm the counter changes (navigates results) and the chat does NOT free-scroll away / focus does NOT leave the input. (5) CRITICAL: run a SECOND (and third) search in the same session (clear + type new term + Enter) and confirm Up/Down STILL navigate results (this was the core regression). (6) Repeat with query 'photo' and 'video' (same single search bar) and confirm arrows navigate matching media results. Confirm arrow keys never scroll/affect the main chat while the search input is focused. NOTE: passcode has a 10-wrong-attempt permanent device lockout — always use 2407, never guess."
+    -agent: "testing"
+    -message: "Bug fix verification COMPLETE. All test scenarios passed successfully. The search keyboard navigation now works correctly across repeated searches. Key findings: (1) Focus remains on search input after submitting searches (blur() removed). (2) Arrow keys navigate results correctly in first, second, and third searches. (3) preventDefault() and stopPropagation() prevent arrow keys from affecting chat scroll. (4) Tested with text searches ('love', 'omg') and media searches ('photo') - all working. (5) Counter updates correctly with each arrow press. (6) Chat scroll position remains stable during arrow navigation. The core regression (arrows not working after first search) is FIXED. No issues found."

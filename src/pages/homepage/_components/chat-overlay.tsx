@@ -1391,8 +1391,10 @@ export default function ChatOverlay({
   // ── Run a full-history search and jump to the first (newest) match.
   const runSearch = useCallback(async () => {
     const q = searchQuery.trim();
-    // Dismiss the mobile keyboard the moment the user submits.
-    searchInputRef.current?.blur();
+    // Keep focus INSIDE the search input after submitting so that repeated
+    // searches and Up/Down keyboard navigation keep working. (Previously we
+    // blurred here, which dropped focus onto the document — after that the
+    // arrow keys scrolled the chat instead of moving through results.)
     if (!q) {
       setSearchResults([]);
       setSearchIndex(0);
@@ -1813,7 +1815,36 @@ export default function ChatOverlay({
                     data-testid="chat-search-input"
                     value={searchQuery}
                     onChange={(e) => { setSearchQuery(e.target.value); setSearchDone(false); }}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runSearch(); } }}
+                    onKeyDown={(e) => {
+                      // Keep ALL key events inside the search box so arrow keys
+                      // never bubble to the chat / scroll container.
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void runSearch();
+                        return;
+                      }
+                      if (e.key === "ArrowDown") {
+                        // Next (older) result.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (searchResults.length > 0) { haptics.light(); gotoResult(searchIndex + 1); }
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        // Previous (newer) result.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (searchResults.length > 0) { haptics.light(); gotoResult(searchIndex - 1); }
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeSearch();
+                        return;
+                      }
+                    }}
                     type="search"
                     inputMode="search"
                     enterKeyHint="search"
