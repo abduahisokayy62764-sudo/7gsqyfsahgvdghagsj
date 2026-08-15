@@ -408,6 +408,10 @@ export default function ChatOverlay({
   const [searchDone, setSearchDone] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchSeqRef = useRef(0);
+  // Mirrors of the current results + index so keyboard stepping always reads the
+  // TRUE latest position (avoids stale-state closures during rapid key-repeat).
+  const searchResultsRef = useRef<ChatMessage[]>([]);
+  const searchIndexRef = useRef(0);
   const [otherTyping, setOtherTyping] = useState<Sender | null>(null);
 
   // Voice recording state
@@ -1397,7 +1401,9 @@ export default function ChatOverlay({
     // arrow keys scrolled the chat instead of moving through results.)
     if (!q) {
       setSearchResults([]);
+      searchResultsRef.current = [];
       setSearchIndex(0);
+      searchIndexRef.current = 0;
       setSearchDone(false);
       return;
     }
@@ -1408,7 +1414,9 @@ export default function ChatOverlay({
       const res = await cloudSearchMessages(q);
       if (seq !== searchSeqRef.current) return; // a newer search superseded this
       setSearchResults(res);
+      searchResultsRef.current = res;
       setSearchIndex(0);
+      searchIndexRef.current = 0;
       setSearchDone(true);
       if (res.length > 0) {
         void goToMessage(res[0].id, res[0].timestamp);
@@ -1418,16 +1426,38 @@ export default function ChatOverlay({
     }
   }, [searchQuery, goToMessage]);
 
-  // ── Move between results (down = next/older, up = previous/newer).
+  // ── Jump to an ABSOLUTE result index (used by the on-screen ↑/↓ buttons).
   const gotoResult = useCallback(
     (nextIndex: number) => {
-      if (searchResults.length === 0) return;
-      const clamped = ((nextIndex % searchResults.length) + searchResults.length) % searchResults.length;
+      const results = searchResultsRef.current;
+      if (results.length === 0) return;
+      const clamped = ((nextIndex % results.length) + results.length) % results.length;
+      searchIndexRef.current = clamped;
       setSearchIndex(clamped);
-      const r = searchResults[clamped];
+      const r = results[clamped];
       void goToMessage(r.id, r.timestamp);
     },
-    [searchResults, goToMessage],
+    [goToMessage],
+  );
+
+  // ── Step RELATIVE to the current position (used by the keyboard arrows).
+  // Reads/writes searchIndexRef immediately so rapid key-repeat presses always
+  // chain from the true current index (no stale-state jumps). Sequential and
+  // CLAMPED at both ends — Up stops at the last result, Down stops at 1/N
+  // (no wrap-around).
+  const stepResult = useCallback(
+    (delta: number) => {
+      const results = searchResultsRef.current;
+      if (results.length === 0) return;
+      const cur = searchIndexRef.current;
+      const next = Math.max(0, Math.min(results.length - 1, cur + delta));
+      if (next === cur) return; // already at a boundary — do nothing
+      searchIndexRef.current = next;
+      setSearchIndex(next);
+      const r = results[next];
+      void goToMessage(r.id, r.timestamp);
+    },
+    [goToMessage],
   );
 
   const closeSearch = useCallback(() => {
@@ -1435,7 +1465,9 @@ export default function ChatOverlay({
     setSearchOpen(false);
     setSearchQuery("");
     setSearchResults([]);
+    searchResultsRef.current = [];
     setSearchIndex(0);
+    searchIndexRef.current = 0;
     setSearchLoading(false);
     setSearchDone(false);
     setHighlightId(null);
@@ -1828,14 +1860,16 @@ export default function ChatOverlay({
                         // Newer (previous) result — scroll downward to show it.
                         e.preventDefault();
                         e.stopPropagation();
-                        if (searchResults.length > 0) { haptics.light(); gotoResult(searchIndex - 1); }
+                        haptics.light();
+                        stepResult(-1);
                         return;
                       }
                       if (e.key === "ArrowUp") {
                         // Older (next) result — scroll upward to show it.
                         e.preventDefault();
                         e.stopPropagation();
-                        if (searchResults.length > 0) { haptics.light(); gotoResult(searchIndex + 1); }
+                        haptics.light();
+                        stepResult(1);
                         return;
                       }
                       if (e.key === "Escape") {
