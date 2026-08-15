@@ -1825,17 +1825,17 @@ export default function ChatOverlay({
                         return;
                       }
                       if (e.key === "ArrowDown") {
-                        // Next (older) result.
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (searchResults.length > 0) { haptics.light(); gotoResult(searchIndex + 1); }
-                        return;
-                      }
-                      if (e.key === "ArrowUp") {
-                        // Previous (newer) result.
+                        // Newer (previous) result — scroll downward to show it.
                         e.preventDefault();
                         e.stopPropagation();
                         if (searchResults.length > 0) { haptics.light(); gotoResult(searchIndex - 1); }
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        // Older (next) result — scroll upward to show it.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (searchResults.length > 0) { haptics.light(); gotoResult(searchIndex + 1); }
                         return;
                       }
                       if (e.key === "Escape") {

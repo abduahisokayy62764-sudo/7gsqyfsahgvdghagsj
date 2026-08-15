@@ -113,9 +113,12 @@ frontend:
     priority: "high"
     needs_retesting: false
     status_history:
+        -working: true
+        -agent: "testing"
+        -comment: "Verified working: Up/Down navigate results, isolated from chat, across repeated searches (love 1/172, omg 1/67, photo 1/24). Focus stays on input; chat does not free-scroll."
         -working: "NA"
         -agent: "main"
-        -comment: "Root cause: runSearch() called searchInputRef.current?.blur() after submit, dropping focus onto the document; after that Up/Down scrolled the messages container instead of navigating results. Also the input only handled Enter (no ArrowUp/ArrowDown). Fix: (1) removed blur() so focus stays in the input; (2) added onKeyDown handling for ArrowDown (next/older result -> gotoResult(searchIndex+1)), ArrowUp (previous/newer -> gotoResult(searchIndex-1)), Enter (runSearch), Escape (closeSearch), each with e.preventDefault() + e.stopPropagation() so arrow events do not bubble to the chat/scroll container. Same single search bar handles 'photo'/'video'/'voice' queries so this covers all media searches. Passcode to reach the chat: 2407."
+        -comment: "User requested arrow direction be reversed. Swapped only the onKeyDown handler: ArrowUp -> gotoResult(searchIndex+1) (older/previous, scroll up), ArrowDown -> gotoResult(searchIndex-1) (newer/next, scroll down). No other change; on-screen buttons and all other behavior unchanged."
         -working: true
         -agent: "testing"
         -comment: "VERIFIED - Bug fix working correctly. Tested all scenarios: (1) Unlocked with passcode 2407 successfully. (2) Search bar opens with input focused. (3) First search for 'love' returned 172 results, counter displayed correctly (1/172). (4) Arrow key navigation worked: ArrowDown changed counter from 1/172 → 2/172 → 3/172, ArrowUp changed back to 2/172. Focus remained on search input throughout. (5) CRITICAL REGRESSION CHECK PASSED: Second search for 'omg' (67 results) - arrows still worked correctly (1/67 → 2/67 → 1/67), focus stayed on input. (6) Third search for 'photo' (24 results) - arrows worked (1/24 → 2/24), focus maintained. (7) Chat scroll position remained stable (scrollTop: 0), no free-scrolling during arrow navigation. The fix successfully keeps focus in the input after submit and prevents arrow key events from bubbling to the chat container. All test scenarios passed."
