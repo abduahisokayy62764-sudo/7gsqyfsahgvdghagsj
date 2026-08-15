@@ -1,35 +1,12 @@
 {
-  "name": "birthday-website",
+  "name": "habiba-faizan-chat",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "description": "Root wrapper. The actual app lives in ./frontend (Vite SPA) and the Supabase backend in ./backend. These root scripts just delegate to the frontend so the platform preview (yarn dev) keeps working.",
   "scripts": {
-    "start": "vite --host 0.0.0.0 --port 3000",
-    "dev": "vite --host 0.0.0.0 --port 3000",
-    "preview": "vite preview",
-    "build": "vite build",
-    "lint": "eslint ."
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.110.2",
-    "motion": "^12.38.0",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@tailwindcss/vite": "^4.2.4",
-    "@types/node": "^24.12.2",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react-swc": "^4.3.0",
-    "eslint": "^9.39.4",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.26",
-    "globals": "^16.5.0",
-    "tailwindcss": "^4.2.4",
-    "typescript": "~5.9.3",
-    "typescript-eslint": "^8.59.2",
-    "vite": "^7.3.2"
+    "dev": "yarn --cwd frontend dev",
+    "build": "yarn --cwd frontend build",
+    "preview": "yarn --cwd frontend preview",
+    "install:frontend": "yarn --cwd frontend install"
   }
 }

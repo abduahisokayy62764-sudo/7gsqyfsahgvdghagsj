@@ -11,6 +11,8 @@ lerna-debug.log*
 node_modules
 /dist
 /dist-ssr
+dist/
+frontend/dist/
 *.local
 .eslintcache
 tsconfig.tsbuildinfo

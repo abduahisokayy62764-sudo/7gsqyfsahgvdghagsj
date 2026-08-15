@@ -6,6 +6,10 @@ import { defineConfig } from "vite";
 // https://vite.dev/config/
 export default defineConfig({
   envPrefix: ["VITE_", "REACT_APP_"],
+  // Load .env from the repo root (one level up) so the local preview keeps
+  // reading the platform-managed root .env. On Netlify (base = frontend), env
+  // vars are injected via the dashboard/process.env, so this is a no-op there.
+  envDir: path.resolve(__dirname, ".."),
   server: {
     host: "0.0.0.0",
     port: 3000,
